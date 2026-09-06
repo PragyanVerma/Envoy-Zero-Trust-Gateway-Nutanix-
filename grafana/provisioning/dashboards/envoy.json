@@ -1,0 +1,113 @@
+{
+  "title": "Envoy Zero-Trust Metrics",
+  "uid": "envoy-zero-trust",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Traffic per Backend Cluster (Requests/sec)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(envoy_cluster_upstream_rq_total[1m])) by (envoy_cluster_name)",
+          "legendFormat": "{{envoy_cluster_name}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "ML Auth Service Latency P99 (ms)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(envoy_cluster_upstream_rq_time_bucket{envoy_cluster_name=\"auth_service_cluster\"}[1m])) by (le))",
+          "legendFormat": "P99 Latency"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Circuit Breaker - Active Connections per Cluster",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "envoy_cluster_circuit_breakers_default_cx_open",
+          "legendFormat": "{{envoy_cluster_name}} - CB Open"
+        },
+        {
+          "expr": "sum(rate(envoy_cluster_upstream_cx_connect_fail[1m])) by (envoy_cluster_name)",
+          "legendFormat": "{{envoy_cluster_name}} - Connect Failures/sec"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Retries & Errors per Cluster",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(envoy_cluster_upstream_rq_retry[1m])) by (envoy_cluster_name)",
+          "legendFormat": "{{envoy_cluster_name}} - Retries/sec"
+        },
+        {
+          "expr": "sum(rate(envoy_cluster_upstream_rq_5xx[1m])) by (envoy_cluster_name)",
+          "legendFormat": "{{envoy_cluster_name}} - 5xx Errors/sec"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Outlier Detection - Ejections",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(rate(envoy_cluster_outlier_detection_ejections_total[1m])) by (envoy_cluster_name)",
+          "legendFormat": "{{envoy_cluster_name}} - Ejections/sec"
+        },
+        {
+          "expr": "envoy_cluster_outlier_detection_ejections_active",
+          "legendFormat": "{{envoy_cluster_name}} - Currently Ejected"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Request Success Rate (%)",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "100 * (1 - (sum(rate(envoy_cluster_upstream_rq_5xx[1m])) / sum(rate(envoy_cluster_upstream_rq_total[1m]))))",
+          "legendFormat": "Success Rate %"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "red" },
+              { "value": 90, "color": "yellow" },
+              { "value": 99, "color": "green" }
+            ]
+          },
+          "unit": "percent"
+        }
+      }
+    }
+  ],
+  "schemaVersion": 16,
+  "timezone": "browser",
+  "refresh": "5s"
+}

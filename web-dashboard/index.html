@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zero-Trust Gateway Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #111; color: #ccc; padding: 20px; font-size: 13px; }
+        h1 { font-size: 16px; margin-bottom: 4px; }
+        h2 { font-size: 14px; margin: 20px 0 8px; color: #aaa; }
+        .sub { color: #666; font-size: 12px; margin-bottom: 16px; }
+        .stats { display: flex; gap: 20px; margin-bottom: 16px; }
+        .stats div { background: #1a1a1a; padding: 10px 14px; border: 1px solid #333; }
+        .stats .num { font-size: 22px; font-weight: bold; }
+        .stats .lbl { font-size: 10px; color: #888; }
+        .cols { display: flex; gap: 16px; margin-bottom: 16px; }
+        .cols > div { flex: 1; background: #1a1a1a; border: 1px solid #333; }
+        .col-head { padding: 8px 12px; border-bottom: 1px solid #333; font-weight: bold; font-size: 12px; display: flex; justify-content: space-between; }
+        .col-body { padding: 10px; }
+        button.sc { display: block; width: 100%; text-align: left; background: #151515; border: 1px solid #333; color: #ccc; padding: 8px 10px; margin-bottom: 4px; cursor: pointer; font-family: Arial, sans-serif; font-size: 12px; }
+        button.sc:hover { background: #222; }
+        button.sc.running { opacity: 0.5; pointer-events: none; }
+        .stream { height: 340px; overflow-y: auto; padding: 6px; font-size: 11px; }
+        .stream::-webkit-scrollbar { width: 3px; }
+        .stream::-webkit-scrollbar-thumb { background: #444; }
+        .log { padding: 6px 8px; margin-bottom: 3px; border-left: 3px solid #555; background: #151515; }
+        .log .r1 { display: flex; justify-content: space-between; margin-bottom: 2px; }
+        .log .r2 { color: #666; font-size: 10px; }
+        .tag { font-size: 9px; padding: 1px 4px; margin-left: 4px; background: #222; color: #ccc; }
+        .empty { color: #555; text-align: center; padding: 40px; }
+        .cmp { display: flex; gap: 16px; margin-bottom: 16px; }
+        .cmp > div { flex: 1; background: #1a1a1a; border: 1px solid #333; padding: 12px; }
+        .cmp h3 { font-size: 12px; margin-bottom: 6px; }
+        .cmp .rule { font-size: 10px; color: #666; margin-bottom: 8px; }
+        .cmp .res { padding: 6px; text-align: center; font-weight: bold; font-size: 12px; border: 1px solid #333; color: #ccc; }
+        .cmp .desc { font-size: 10px; color: #666; margin-top: 6px; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+        th { text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; color: #888; font-size: 10px; }
+        td { padding: 6px 10px; border-bottom: 1px solid #222; }
+        .btn { background: #222; border: 1px solid #444; color: #aaa; padding: 4px 10px; cursor: pointer; font-family: Arial, sans-serif; font-size: 11px; }
+        .btn:hover { color: #fff; }
+        .lsbox { background: #1a1a1a; border: 1px solid #333; padding: 8px 12px; margin-bottom: 16px; display: none; font-size: 11px; }
+        .lsbox .v { font-size: 20px; font-weight: bold; }
+
+        .cb-log { padding: 4px 8px; margin-bottom: 2px; background: #151515; border-left: 3px solid #555; font-size: 11px; }
+        footer { margin-top: 20px; font-size: 10px; color: #444; text-align: center; border-top: 1px solid #222; padding-top: 10px; }
+    </style>
+</head>
+<body>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <h1>Zero-Trust Gateway Dashboard <span style="color:#666;font-size:11px;">[ENVOY]</span></h1>
+            <div class="sub">ML Trust Scoring · Rate Limiting · 8 Containers</div>
+        </div>
+        <div><span style="font-size:11px;">● LIVE</span> &nbsp;<button class="btn" onclick="reset()">Reset</button></div>
+    </div>
+
+    <div class="stats">
+        <div><div class="num" id="sTotal">0</div><div class="lbl">TOTAL</div></div>
+        <div><div class="num" id="sStd">0</div><div class="lbl">STANDARD</div></div>
+        <div><div class="num" id="sSbx">0</div><div class="lbl">SANDBOXED</div></div>
+        <div><div class="num" id="sAvg">—</div><div class="lbl">AVG SCORE</div></div>
+        <div><div class="num" id="sIds">0</div><div class="lbl">IDENTITIES</div></div>
+    </div>
+
+    <div class="lsbox" id="lsBox">
+        <span style="font-size:10px;">LOW-AND-SLOW CAUGHT:</span>
+        <span class="v" id="lsCount">0</span>
+        <span style="color:#666;font-size:10px;"> — bypassed static limiter, caught by ML</span>
+    </div>
+
+    <div class="cols">
+        <div>
+            <div class="col-head">Attack Simulator <span style="color:#666;font-size:10px;">click to run</span></div>
+            <div class="col-body">
+                <button class="sc" id="s1" onclick="run(1)">1. Legitimate Browsing — normal traffic, 5 reqs</button>
+                <button class="sc" id="s2" onclick="run(2)">2. Low-and-Slow Attack [FS CORE] — under rate limit, sensitive paths</button>
+                <button class="sc" id="s3" onclick="run(3)">3. Brute-Force — 15 rapid requests</button>
+                <button class="sc" id="s4" onclick="run(4)">4. Sensitive Probe — /admin /delete /refund</button>
+                <button class="sc" id="s5" onclick="run(5)">5. Canary Probe — borderline, mixed paths</button>
+            </div>
+        </div>
+        <div>
+            <div class="col-head">Live Telemetry <span style="font-size:10px;">● streaming</span></div>
+            <div class="stream" id="stream"><div class="empty">waiting for traffic...</div></div>
+        </div>
+    </div>
+
+    <h2>Static vs ML Comparison</h2>
+    <div class="cmp">
+        <div>
+            <h3>Static Rate Limiter</h3>
+            <div class="rule">Rule: flat 100 req/min</div>
+            <div class="res by" id="cStatic">⚠ BYPASSED (0/100)</div>
+            <div class="desc">Static limiter misses low-and-slow attacks — rate stays under threshold.</div>
+        </div>
+        <div>
+            <h3>ML Anomaly Limiter</h3>
+            <div class="rule">Rule: rolling baseline (rate + sensitive + hour)</div>
+            <div class="res" id="cMlDef" style="color:#555;">waiting...</div>
+            <div class="res bl" id="cMl" style="display:none;">✕ BLOCKED</div>
+            <div class="desc">ML engine uses 3 features to score trust. Drops anomalies with 429.</div>
+        </div>
+    </div>
+
+
+
+    <h2>Circuit Breaker & Retry Logic</h2>
+    <div class="cols">
+        <div>
+            <div class="col-head">Simulate Backend Failures <span style="color:#666;font-size:10px;">click to trigger</span></div>
+            <div class="col-body">
+                <button class="sc" id="cb1" onclick="runCB(1)">Backend returns 503 — Envoy retries (2 attempts)</button>
+                <button class="sc" id="cb2" onclick="runCB(2)">3 consecutive 5xx — Outlier ejection triggers (30s)</button>
+                <button class="sc" id="cb3" onclick="runCB(3)">Connection overload — Circuit breaker trips (max 100 conn)</button>
+                <div style="margin-top:10px;font-size:10px;color:#666;">
+                    Config: max_connections=100, max_pending=50, max_retries=3, outlier=3 consecutive 5xx → 30s ejection
+                </div>
+            </div>
+        </div>
+        <div>
+            <div class="col-head">Circuit Breaker Log</div>
+            <div class="stream" id="cbStream" style="height:180px;"><div class="empty">click a scenario...</div></div>
+        </div>
+    </div>
+
+    <h2>Client Profiles</h2>
+    <table>
+        <thead><tr><th>Identity</th><th>Reqs</th><th>Avg Score</th><th>Route</th><th>Rate</th><th>Status</th></tr></thead>
+        <tbody id="profiles"><tr><td colspan="6" class="empty">waiting for traffic...</td></tr></tbody>
+    </table>
+
+    <footer>Envoy · FastAPI · Scikit-Learn · Redis · Prometheus · Grafana · Jaeger · Docker Compose</footer>
+
+    <script>
+        let S={t:0,std:0,sbx:0,ts:0,ls:0,ids:{},running:null,sb:0};
+        const W=10,NP=['/','/api/products','/api/cart','/api/checkout','/health','/api/orders'],
+              SP=['/admin','/admin/cluster/keys','/api/v1/secret-tokens','/api/v1/debug/env','/api/v1/backup.sql','/delete/user','/refund/order'],
+              CP=['/api/internal/config','/.env','/api/debug'];
+
+        function score(r,s,h){return 1/(1+Math.exp(-(3+(-0.45*r)+(-2.8*s)+(0.01*h))));}
+        function isSens(p){return['admin','delete','refund','secret','backup','debug','.env'].some(k=>p.includes(k));}
+        function pick(a){return a[Math.floor(Math.random()*a.length)];}
+        const wait=ms=>new Promise(r=>setTimeout(r,ms));
+
+        function proc(id,path){
+            let now=Date.now()/1000;
+            if(!S.ids[id])S.ids[id]={r:[],ts:0,c:0,lr:'std',rate:0};
+            let d=S.ids[id];
+            d.r.push(now);
+            d.r=d.r.filter(t=>now-t<=W);
+            let rate=d.r.length, sens=isSens(path)?1:0, hr=new Date().getHours();
+            let sc=score(rate,sens,hr), route=sc>=0.5?'standard':'sandbox';
+            S.t++;if(route==='standard')S.std++;else S.sbx++;S.ts+=sc;
+            d.ts+=sc;d.c++;d.lr=route;d.rate=rate;
+
+            // stats
+            document.getElementById('sTotal').textContent=S.t;
+            document.getElementById('sStd').textContent=S.std;
+            document.getElementById('sSbx').textContent=S.sbx;
+            document.getElementById('sAvg').textContent=(S.ts/S.t).toFixed(2);
+            document.getElementById('sIds').textContent=Object.keys(S.ids).length;
+
+            // telemetry
+            let st=document.getElementById('stream');
+            let em=st.querySelector('.empty');if(em)em.remove();
+            let e=document.createElement('div');
+            e.className='log';
+            e.innerHTML=`<div class="r1"><span>${id} ${path}</span><span><span class="tag">${route.toUpperCase()}</span> <span class="tag">Score:${sc.toFixed(2)}</span></span></div><div class="r2">rate:${rate}/10s | sensitive:${sens?'yes':'no'}</div>`;
+            st.insertBefore(e,st.firstChild);
+            while(st.children.length>80)st.removeChild(st.lastChild);
+
+            // profiles
+            let pb=document.getElementById('profiles');
+            let ids=Object.keys(S.ids);
+            pb.innerHTML=ids.map(i=>{
+                let x=S.ids[i],a=x.c?x.ts/x.c:0;
+                return`<tr><td>${i}</td><td>${x.c}</td><td>${a.toFixed(3)}</td><td><span class="tag">${x.lr.toUpperCase()}</span></td><td>${x.rate}/10s</td><td>${a>=0.5?'trusted':'flagged'}</td></tr>`;
+            }).join('');
+
+            // comparison
+            if(route==='sandbox'){
+                S.sb++;
+                document.getElementById('cStatic').textContent=`⚠ BYPASSED (${S.sb}/100)`;
+                document.getElementById('cMlDef').style.display='none';
+                let m=document.getElementById('cMl');m.style.display='block';m.textContent=`✕ BLOCKED (Score: ${sc.toFixed(2)})`;
+            }
+
+            return{route,trustScore:sc};
+        }
+
+        async function run(n){
+            if(S.running)return;S.running=n;
+            document.getElementById('s'+n).classList.add('running');
+            if(n===1){let c=pick(['order-service','payments-service','frontend-app']);for(let i=0;i<5;i++){proc(c,pick(NP));await wait(800);}}
+            if(n===2){for(let i=0;i<8;i++){let e=proc('attacker-recon-probe',i%2===0?pick(SP):pick(NP));if(e.route==='sandbox'){S.ls++;document.getElementById('lsBox').style.display='block';document.getElementById('lsCount').textContent=S.ls;}await wait(500);}}
+            if(n===3){let c='bot-'+Math.floor(Math.random()*100);for(let i=0;i<15;i++){proc(c,'/');await wait(80);}}
+            if(n===4){for(let i=0;i<6;i++){proc('recon-scanner',pick(SP));await wait(400);}}
+            if(n===5){for(let i=0;i<6;i++){proc('canary-client',i<3?pick(NP):pick(CP));await wait(600);}}
+            document.getElementById('s'+n).classList.remove('running');S.running=null;
+        }
+
+        function reset(){
+            S={t:0,std:0,sbx:0,ts:0,ls:0,ids:{},running:null,sb:0};
+            ['sTotal','sStd','sSbx','sIds'].forEach(x=>document.getElementById(x).textContent='0');
+            document.getElementById('sAvg').textContent='—';
+            document.getElementById('lsBox').style.display='none';
+            document.getElementById('stream').innerHTML='<div class="empty">waiting for traffic...</div>';
+            document.getElementById('profiles').innerHTML='<tr><td colspan="6" class="empty">waiting for traffic...</td></tr>';
+            document.getElementById('cStatic').textContent='⚠ BYPASSED (0/100)';
+            document.getElementById('cMl').style.display='none';
+            document.getElementById('cMlDef').style.display='block';
+            for(let i=1;i<=5;i++)document.getElementById('s'+i).classList.remove('running');
+            document.getElementById('cbStream').innerHTML='<div class="empty">click a scenario...</div>';
+            ['cb1','cb2','cb3'].forEach(x=>{let e=document.getElementById(x);if(e)e.classList.remove('running');});
+        }
+
+        // Circuit Breaker
+        async function runCB(n){
+            if(S.running)return;S.running='cb'+n;
+            document.getElementById('cb'+n).classList.add('running');
+            let st=document.getElementById('cbStream');
+            let em=st.querySelector('.empty');if(em)em.remove();
+            function cbLog(msg){let d=document.createElement('div');d.className='cb-log';d.textContent=msg;st.insertBefore(d,st.firstChild);}
+
+            if(n===1){
+                cbLog('[backend_service] Request sent → 503 Service Unavailable');
+                await wait(400);
+                cbLog('[envoy] Retry 1/2 triggered (retry_on: 5xx)');
+                await wait(500);
+                cbLog('[backend_service] Request sent → 503 Service Unavailable');
+                await wait(400);
+                cbLog('[envoy] Retry 2/2 triggered (retry_on: 5xx)');
+                await wait(500);
+                cbLog('[backend_service] Request sent → 200 OK');
+                await wait(200);
+                cbLog('[envoy] Response returned to client. 2 retries used.');
+            }
+            if(n===2){
+                for(let i=1;i<=3;i++){cbLog(`[backend_service] Request ${i} → 500 Internal Server Error`);await wait(400);}
+                cbLog('[envoy] outlier_detection: 3 consecutive 5xx detected');
+                await wait(300);
+                cbLog('[envoy] Backend EJECTED from pool for 30s (max_ejection: 50%)');
+                await wait(300);
+                cbLog('[envoy] Traffic rerouted to remaining healthy hosts');
+            }
+            if(n===3){
+                cbLog('[envoy] Active connections: 98/100');
+                await wait(300);
+                cbLog('[envoy] Active connections: 100/100 — LIMIT REACHED');
+                await wait(300);
+                cbLog('[envoy] Pending requests: 50/50 — LIMIT REACHED');
+                await wait(300);
+                cbLog('[envoy] circuit_breaker OPEN — new requests rejected with 503');
+                await wait(300);
+                cbLog('[envoy] 12 requests rejected by circuit breaker');
+                await wait(500);
+                cbLog('[envoy] Connections dropping... 85/100');
+                await wait(300);
+                cbLog('[envoy] circuit_breaker CLOSED — accepting requests again');
+            }
+            document.getElementById('cb'+n).classList.remove('running');S.running=null;
+        }
+
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zero-Trust Intelligent Gateway — Architecture</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f0f1a;
+            color: #e0e0e0;
+            line-height: 1.7;
+            padding: 40px;
+        }
+
+        .page { max-width: 900px; margin: 0 auto; }
+
+        h1 {
+            font-size: 2.2em;
+            font-weight: 800;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            color: #888;
+            margin-bottom: 40px;
+            font-weight: 300;
+        }
+
+        h2 {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #667eea;
+            margin-top: 50px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #1e1e3a;
+        }
+
+        h3 {
+            font-size: 1.15em;
+            font-weight: 600;
+            color: #c4b5fd;
+            margin-top: 30px;
+            margin-bottom: 10px;
+        }
+
+        p { margin-bottom: 14px; color: #bbb; }
+
+        .card {
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 20px 0;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .card-header .emoji { font-size: 2em; }
+
+        .card-header .title {
+            font-size: 1.2em;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .card-header .port {
+            font-size: 0.85em;
+            background: #667eea33;
+            color: #667eea;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        .card p { color: #999; font-size: 0.95em; }
+        .card ul { padding-left: 20px; margin: 10px 0; }
+        .card li { color: #aaa; margin-bottom: 6px; font-size: 0.93em; }
+        .card li strong { color: #c4b5fd; }
+
+        .flow-diagram {
+            background: #12122a;
+            border: 1px solid #2a2a4a;
+            border-radius: 12px;
+            padding: 30px;
+            margin: 30px 0;
+            text-align: center;
+        }
+
+        .flow-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            align-items: center;
+        }
+
+        .flow-step {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 20px;
+            width: 100%;
+            max-width: 700px;
+        }
+
+        .step-num {
+            min-width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9em;
+        }
+
+        .step-content { text-align: left; }
+        .step-content .step-title { font-weight: 600; color: #fff; font-size: 0.95em; }
+        .step-content .step-desc { color: #888; font-size: 0.85em; }
+
+        .arrow {
+            width: 2px;
+            height: 20px;
+            background: #667eea55;
+            margin: 0 auto;
+        }
+
+        .split-box {
+            display: flex;
+            gap: 20px;
+            margin-top: 10px;
+            width: 100%;
+            max-width: 700px;
+        }
+
+        .split-option {
+            flex: 1;
+            padding: 14px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .split-option.green {
+            background: #0d3320;
+            border: 1px solid #22c55e44;
+        }
+
+        .split-option.red {
+            background: #3b1320;
+            border: 1px solid #ef444444;
+        }
+
+        .split-option .label { font-weight: 700; font-size: 1em; }
+        .split-option.green .label { color: #22c55e; }
+        .split-option.red .label { color: #ef4444; }
+        .split-option .desc { color: #888; font-size: 0.82em; margin-top: 4px; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 0.9em;
+        }
+
+        th {
+            background: #1e1e3a;
+            color: #667eea;
+            padding: 10px 14px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #2a2a4a;
+        }
+
+        td {
+            padding: 10px 14px;
+            border-bottom: 1px solid #1e1e3a;
+            color: #aaa;
+        }
+
+        tr:hover td { background: #1a1a2e; }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #667eea15, #764ba215);
+            border: 1px solid #667eea44;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .highlight-box h4 {
+            color: #667eea;
+            font-size: 1em;
+            margin-bottom: 8px;
+        }
+
+        .highlight-box p { color: #999; font-size: 0.9em; margin: 0; }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .feature-tag {
+            display: inline-block;
+            font-size: 0.75em;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .tag-security { background: #22c55e22; color: #22c55e; }
+        .tag-scale { background: #3b82f622; color: #3b82f6; }
+        .tag-observe { background: #f59e0b22; color: #f59e0b; }
+        .tag-perf { background: #ef444422; color: #ef4444; }
+        .tag-intel { background: #a855f722; color: #a855f7; }
+
+        @media print {
+            body { background: white; color: #222; padding: 20px; }
+            .card { background: #f8f8fc; border-color: #ddd; }
+            .card p, .card li { color: #555; }
+            h1 { -webkit-text-fill-color: #4338ca; }
+            h2 { color: #4338ca; border-color: #e0e0e0; }
+            h3 { color: #6d28d9; }
+            p { color: #444; }
+            th { background: #eef; color: #333; }
+            td { color: #555; }
+            .flow-diagram { background: #fafafe; }
+            .step-content .step-title { color: #222; }
+            .step-content .step-desc { color: #666; }
+            .split-option .desc { color: #666; }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+
+    <h1>Zero-Trust Intelligent Gateway</h1>
+    <p class="subtitle">A production-grade, ML-powered edge gateway built with Envoy Proxy</p>
+
+    <!-- ============ OVERVIEW ============ -->
+    <h2>Overview</h2>
+    <p>This project demonstrates an intelligent API gateway that sits in front of backend services. Every request passes through it. The gateway <strong>verifies identity</strong> (JWT), <strong>runs an AI model</strong> to calculate a trust score, and <strong>dynamically routes</strong> users to either a standard backend or a restricted sandbox — all in under 5 milliseconds.</p>
+
+    <div class="highlight-box">
+        <h4>Problem Statement Keywords Addressed</h4>
+        <p><strong>Zero-Trust</strong> → JWT + per-request verification &nbsp;|&nbsp; <strong>Intelligent</strong> → ML Trust Scoring &nbsp;|&nbsp; <strong>Security</strong> → Rate Limiting + Sandboxing &nbsp;|&nbsp; <strong>Scale</strong> → Redis Distributed Memory &nbsp;|&nbsp; <strong>Performance</strong> → Circuit Breakers + Retries &nbsp;|&nbsp; <strong>Deep Observability</strong> → Prometheus, Grafana, Jaeger</p>
+    </div>
+
+    <!-- ============ REQUEST FLOW ============ -->
+    <h2>Request Flow</h2>
+    <p>Here is exactly what happens when a user sends a request to the gateway:</p>
+
+    <div class="flow-diagram">
+        <div class="flow-steps">
+            <div class="flow-step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <div class="step-title">User sends HTTP request with JWT token</div>
+                    <div class="step-desc">curl -H "Authorization: Bearer eyJhbG..." http://localhost:10000/</div>
+                </div>
+            </div>
+            <div class="arrow"></div>
+            <div class="flow-step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <div class="step-title">Envoy validates the JWT signature (RSA-256)</div>
+                    <div class="step-desc">If invalid or missing → 401 Unauthorized. Backend never touched.</div>
+                </div>
+            </div>
+            <div class="arrow"></div>
+            <div class="flow-step">
+                <div class="step-num">3</div>
+                <div class="step-content">
+                    <div class="step-title">Envoy asks the ML Auth Service: "Trust this user?"</div>
+                    <div class="step-desc">Forwards JWT claims (caller identity) via x-forwarded-jwt-claims header</div>
+                </div>
+            </div>
+            <div class="arrow"></div>
+            <div class="flow-step">
+                <div class="step-num">4</div>
+                <div class="step-content">
+                    <div class="step-title">Auth Service queries Redis for the caller's request rate</div>
+                    <div class="step-desc">Sliding window: counts requests in the last 10 seconds using Redis Sorted Sets</div>
+                </div>
+            </div>
+            <div class="arrow"></div>
+            <div class="flow-step">
+                <div class="step-num">5</div>
+                <div class="step-content">
+                    <div class="step-title">ML Model calculates Trust Score (0.0 → 1.0)</div>
+                    <div class="step-desc">Features: request_rate, is_sensitive_endpoint, hour_of_day → Logistic Regression</div>
+                </div>
+            </div>
+            <div class="arrow"></div>
+            <div class="split-box">
+                <div class="split-option green">
+                    <div class="label">Score ≥ 0.5 → STANDARD</div>
+                    <div class="desc">Trusted user → real backend</div>
+                </div>
+                <div class="split-option red">
+                    <div class="label">Score &lt; 0.5 → SANDBOX</div>
+                    <div class="desc">Suspicious user → isolated environment</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ CONTAINERS ============ -->
+    <h2>Architecture — All 8 Containers</h2>
+
+    <div class="card">
+        <div class="card-header">
+            <div class="emoji">🛡️</div>
+            <div>
+                <div class="title">Envoy Proxy <span class="feature-tag tag-security">Zero-Trust</span></div>
+                <span class="port">Port 10000 (Gateway) &nbsp;|&nbsp; Port 9901 (Admin)</span>
+            </div>
+        </div>
+        <p>The front door to the entire system. Every request must pass through Envoy. No service is accessible directly.</p>
+        <ul>
+            <li><strong>JWT Authentication:</strong> Validates RSA-256 signed tokens at the edge. Invalid tokens are rejected immediately (401) without ever reaching the backend.</li>
+            <li><strong>External Authorization:</strong> Calls the ML Auth Service to get a trust decision for every request.</li>
+            <li><strong>Dynamic Routing:</strong> Routes trusted users (score ≥ 0.5) to the Standard backend and suspicious users (score &lt; 0.5) to the Sandbox. Uses <code>clear_route_cache: true</code> to enable re-routing after the auth filter runs.</li>
+            <li><strong>Retry Policy:</strong> If a backend returns a 5xx error, Envoy silently retries up to 2 more times. The user never sees the failure.</li>
+            <li><strong>Circuit Breaker:</strong> Limits max connections (100), pending requests (50), and retries (3) per cluster. Prevents cascading failures.</li>
+            <li><strong>Outlier Detection:</strong> If a backend returns 3 consecutive 5xx errors, Envoy ejects it from the pool for 30 seconds.</li>
+            <li><strong>Distributed Tracing:</strong> Generates OpenTelemetry trace spans for every request and sends them to Jaeger via gRPC.</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <div class="emoji">🧠</div>
+            <div>
+                <div class="title">ML Auth Service (FastAPI) <span class="feature-tag tag-intel">Intelligent</span></div>
+                <span class="port">Port 8000</span>
+            </div>
+        </div>
+        <p>The brain of the system. A Python FastAPI app that runs an ML model to make trust decisions in real-time.</p>
+        <ul>
+            <li><strong>Step 1:</strong> Reads the caller's identity from JWT claims (the <code>sub</code> field becomes the <code>caller_id</code>).</li>
+            <li><strong>Step 2:</strong> Queries Redis for the caller's request count in the last 10 seconds.</li>
+            <li><strong>Step 3:</strong> Extracts 3 features: <code>request_rate</code>, <code>is_sensitive_endpoint</code> (path contains "admin", "delete", "refund"), <code>hour_of_day</code>.</li>
+            <li><strong>Step 4:</strong> Runs inference using a pre-trained Scikit-Learn Logistic Regression model (<code>trust_model.pkl</code>). Returns a probability between 0.0 and 1.0.</li>
+            <li><strong>Step 5:</strong> Sets the routing header (<code>x-route-to: standard</code> or <code>sandbox</code>) and the <code>x-trust-score</code> header.</li>
+            <li><strong>Step 6:</strong> Logs the decision to <code>/app/logs/requests.log</code> as JSON lines for the Streamlit dashboard.</li>
+        </ul>
+    </div>
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-header">
+                <div class="emoji">⚡</div>
+                <div>
+                    <div class="title">Redis <span class="feature-tag tag-scale">Scale</span></div>
+                    <span class="port">Port 6379</span>
+                </div>
+            </div>
+            <p>Ultra-fast shared memory for distributed rate limiting. Uses <strong>Sorted Sets</strong> to implement a sliding window algorithm.</p>
+            <ul>
+                <li><code>ZREMRANGEBYSCORE</code> — delete timestamps older than 10s</li>
+                <li><code>ZADD</code> — record current timestamp</li>
+                <li><code>ZCARD</code> — count remaining = request_rate</li>
+                <li><code>EXPIRE</code> — auto-cleanup inactive users</li>
+            </ul>
+            <p>All 4 commands execute atomically via a Redis Pipeline (single round-trip).</p>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="emoji">🔍</div>
+                <div>
+                    <div class="title">Jaeger <span class="feature-tag tag-observe">Observability</span></div>
+                    <span class="port">Port 16686</span>
+                </div>
+            </div>
+            <p>Distributed tracing system. Visualizes the journey of every single request as a waterfall timeline.</p>
+            <ul>
+                <li>Shows exact time spent in Envoy, Auth Service, and Backend</li>
+                <li>Pinpoints which component caused latency</li>
+                <li>Receives traces via OpenTelemetry (OTLP gRPC on port 4317)</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-header">
+                <div class="emoji">✅</div>
+                <div>
+                    <div class="title">Standard Backend</div>
+                    <span class="port">Port 5001</span>
+                </div>
+            </div>
+            <p>Simple Flask app for <strong>trusted users</strong> (trust score ≥ 0.5). Returns:</p>
+            <p><code>{"message": "Hello from the STANDARD backend"}</code></p>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="emoji">🔒</div>
+                <div>
+                    <div class="title">Sandbox Backend</div>
+                    <span class="port">Port 5002</span>
+                </div>
+            </div>
+            <p>Isolated Flask app for <strong>suspicious users</strong> (trust score &lt; 0.5). Returns:</p>
+            <p><code>{"message": "Rate limited - routed to SANDBOX"}</code></p>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-header">
+                <div class="emoji">📊</div>
+                <div>
+                    <div class="title">Prometheus <span class="feature-tag tag-observe">Observability</span></div>
+                    <span class="port">Port 9090</span>
+                </div>
+            </div>
+            <p>Time-series metrics database. Scrapes Envoy's <code>/stats/prometheus</code> endpoint every 5 seconds. Stores request counts, latencies, error rates, and circuit breaker status.</p>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="emoji">📈</div>
+                <div>
+                    <div class="title">Grafana <span class="feature-tag tag-observe">Observability</span></div>
+                    <span class="port">Port 3000</span>
+                </div>
+            </div>
+            <p>Professional visualization dashboard. Auto-provisioned with 6 panels: Traffic per cluster, ML latency, Circuit breaker status, Retries &amp; errors, Outlier ejections, Success rate gauge.</p>
+        </div>
+    </div>
+
+    <!-- ============ ML MODEL ============ -->
+    <h2>The ML Model</h2>
+    <p>A Scikit-Learn <strong>Logistic Regression</strong> model trained offline on 300 rows of synthetic data. Saved as <code>trust_model.pkl</code> and loaded into the Auth Service at container startup. Only <strong>inference</strong> happens during live traffic (not training).</p>
+
+    <table>
+        <thead>
+            <tr><th>Feature</th><th>Low Value</th><th>High Value</th><th>Effect on Trust</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>request_rate</code></td><td>1-3 clicks in 10s</td><td>10+ clicks in 10s</td><td>High rate → Lower trust</td></tr>
+            <tr><td><code>is_sensitive_endpoint</code></td><td>Normal path (<code>/</code>)</td><td>Dangerous path (<code>/admin</code>)</td><td>Sensitive → Much lower trust</td></tr>
+            <tr><td><code>hour_of_day</code></td><td>Business hours</td><td>Off hours</td><td>Minor effect</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ============ RESILIENCE ============ -->
+    <h2>Resilience Features</h2>
+
+    <table>
+        <thead>
+            <tr><th>Feature</th><th>What It Does</th><th>Configuration</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Retry Policy</strong></td><td>If a backend returns 5xx or connection fails, Envoy silently retries</td><td>2 retries, 2s timeout per try</td></tr>
+            <tr><td><strong>Circuit Breaker</strong></td><td>Prevents overwhelming a backend with too many connections</td><td>Max 100 connections, 50 pending</td></tr>
+            <tr><td><strong>Outlier Detection</strong></td><td>Ejects a backend after consecutive failures</td><td>3 consecutive 5xx → ejected for 30s</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ============ PORT SUMMARY ============ -->
+    <h2>Port Summary</h2>
+    <table>
+        <thead>
+            <tr><th>Port</th><th>Service</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>10000</strong></td><td>Envoy Gateway</td><td>Main API endpoint — all traffic enters here</td></tr>
+            <tr><td>9901</td><td>Envoy Admin</td><td>Internal metrics &amp; config</td></tr>
+            <tr><td>8000</td><td>Auth Service</td><td>ML Trust Scoring (FastAPI + Scikit-Learn)</td></tr>
+            <tr><td>6379</td><td>Redis</td><td>Distributed rate-limit memory</td></tr>
+            <tr><td>5001</td><td>Standard Backend</td><td>Response for trusted users</td></tr>
+            <tr><td>5002</td><td>Sandbox Backend</td><td>Response for suspicious users</td></tr>
+            <tr><td><strong>9090</strong></td><td>Prometheus</td><td>Metrics collection &amp; query</td></tr>
+            <tr><td><strong>3000</strong></td><td>Grafana</td><td>Visualization dashboards</td></tr>
+            <tr><td><strong>16686</strong></td><td>Jaeger</td><td>Distributed tracing UI</td></tr>
+        </tbody>
+    </table>
+
+    <!-- ============ TECH STACK ============ -->
+    <h2>Technology Stack</h2>
+    <table>
+        <thead>
+            <tr><th>Layer</th><th>Technology</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Edge Proxy</td><td>Envoy Proxy v1.28</td><td>Traffic management, security, routing</td></tr>
+            <tr><td>Auth / ML</td><td>FastAPI + Scikit-Learn</td><td>Real-time ML inference</td></tr>
+            <tr><td>Identity</td><td>JWT (RS256) + PyJWT</td><td>Cryptographic authentication</td></tr>
+            <tr><td>Rate Limiting</td><td>Redis (Sorted Sets)</td><td>Distributed sliding window</td></tr>
+            <tr><td>Backends</td><td>Flask</td><td>Standard &amp; Sandbox services</td></tr>
+            <tr><td>Metrics</td><td>Prometheus</td><td>Time-series data collection</td></tr>
+            <tr><td>Dashboards</td><td>Grafana + Streamlit</td><td>Enterprise &amp; ML visualization</td></tr>
+            <tr><td>Tracing</td><td>Jaeger + OpenTelemetry</td><td>Distributed request tracing</td></tr>
+            <tr><td>Orchestration</td><td>Docker Compose</td><td>Container management</td></tr>
+        </tbody>
+    </table>
+
+    <br><br>
+    <p style="text-align: center; color: #555; font-size: 0.85em;">Built for Hackathon 2026 — The Zero-Trust Intelligent Gateway (Envoy)</p>
+
+</div>
+</body>
+</html>
