@@ -154,14 +154,14 @@
             S.t++;if(route==='standard')S.std++;else S.sbx++;S.ts+=sc;
             d.ts+=sc;d.c++;d.lr=route;d.rate=rate;
 
-            // stats
+
             document.getElementById('sTotal').textContent=S.t;
             document.getElementById('sStd').textContent=S.std;
             document.getElementById('sSbx').textContent=S.sbx;
             document.getElementById('sAvg').textContent=(S.ts/S.t).toFixed(2);
             document.getElementById('sIds').textContent=Object.keys(S.ids).length;
 
-            // telemetry
+
             let st=document.getElementById('stream');
             let em=st.querySelector('.empty');if(em)em.remove();
             let e=document.createElement('div');
@@ -170,7 +170,7 @@
             st.insertBefore(e,st.firstChild);
             while(st.children.length>80)st.removeChild(st.lastChild);
 
-            // profiles
+
             let pb=document.getElementById('profiles');
             let ids=Object.keys(S.ids);
             pb.innerHTML=ids.map(i=>{
@@ -178,7 +178,7 @@
                 return`<tr><td>${i}</td><td>${x.c}</td><td>${a.toFixed(3)}</td><td><span class="tag">${x.lr.toUpperCase()}</span></td><td>${x.rate}/10s</td><td>${a>=0.5?'trusted':'flagged'}</td></tr>`;
             }).join('');
 
-            // comparison
+
             if(route==='sandbox'){
                 S.sb++;
                 document.getElementById('cStatic').textContent=`⚠ BYPASSED (${S.sb}/100)`;
@@ -215,7 +215,7 @@
             ['cb1','cb2','cb3'].forEach(x=>{let e=document.getElementById(x);if(e)e.classList.remove('running');});
         }
 
-        // Circuit Breaker
+
         async function runCB(n){
             if(S.running)return;S.running='cb'+n;
             document.getElementById('cb'+n).classList.add('running');

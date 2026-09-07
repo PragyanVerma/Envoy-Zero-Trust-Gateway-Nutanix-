@@ -255,7 +255,7 @@
     <h1>Zero-Trust Intelligent Gateway</h1>
     <p class="subtitle">A production-grade, ML-powered edge gateway built with Envoy Proxy</p>
 
-    <!-- ============ OVERVIEW ============ -->
+
     <h2>Overview</h2>
     <p>This project demonstrates an intelligent API gateway that sits in front of backend services. Every request passes through it. The gateway <strong>verifies identity</strong> (JWT), <strong>runs an AI model</strong> to calculate a trust score, and <strong>dynamically routes</strong> users to either a standard backend or a restricted sandbox — all in under 5 milliseconds.</p>
 
@@ -264,7 +264,7 @@
         <p><strong>Zero-Trust</strong> → JWT + per-request verification &nbsp;|&nbsp; <strong>Intelligent</strong> → ML Trust Scoring &nbsp;|&nbsp; <strong>Security</strong> → Rate Limiting + Sandboxing &nbsp;|&nbsp; <strong>Scale</strong> → Redis Distributed Memory &nbsp;|&nbsp; <strong>Performance</strong> → Circuit Breakers + Retries &nbsp;|&nbsp; <strong>Deep Observability</strong> → Prometheus, Grafana, Jaeger</p>
     </div>
 
-    <!-- ============ REQUEST FLOW ============ -->
+
     <h2>Request Flow</h2>
     <p>Here is exactly what happens when a user sends a request to the gateway:</p>
 
@@ -323,7 +323,7 @@
         </div>
     </div>
 
-    <!-- ============ CONTAINERS ============ -->
+
     <h2>Architecture — All 8 Containers</h2>
 
     <div class="card">
@@ -451,7 +451,7 @@
         </div>
     </div>
 
-    <!-- ============ ML MODEL ============ -->
+
     <h2>The ML Model</h2>
     <p>A Scikit-Learn <strong>Logistic Regression</strong> model trained offline on 300 rows of synthetic data. Saved as <code>trust_model.pkl</code> and loaded into the Auth Service at container startup. Only <strong>inference</strong> happens during live traffic (not training).</p>
 
@@ -466,7 +466,7 @@
         </tbody>
     </table>
 
-    <!-- ============ RESILIENCE ============ -->
+
     <h2>Resilience Features</h2>
 
     <table>
@@ -480,7 +480,7 @@
         </tbody>
     </table>
 
-    <!-- ============ PORT SUMMARY ============ -->
+
     <h2>Port Summary</h2>
     <table>
         <thead>
@@ -499,7 +499,7 @@
         </tbody>
     </table>
 
-    <!-- ============ TECH STACK ============ -->
+
     <h2>Technology Stack</h2>
     <table>
         <thead>

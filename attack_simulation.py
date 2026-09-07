@@ -2,7 +2,6 @@ import time
 import requests
 import sys
 
-# Import create_jwt from generate_jwt
 try:
     from generate_jwt import create_jwt
 except ImportError:
@@ -35,21 +34,18 @@ def send_request(caller_id, path="/", delay=0):
 print("="*50)
 print("SCENARIO 1: Normal Traffic")
 print("="*50)
-# order-service sends 5 requests with 1s delay
 for i in range(5):
     send_request("order-service", delay=1)
 
 print("\n" + "="*50)
 print("SCENARIO 2: Burst Attack")
 print("="*50)
-# suspicious-service sends 15 rapid requests
 for i in range(15):
     send_request("suspicious-service", delay=0)
 
 print("\n" + "="*50)
 print("SCENARIO 3: Sensitive Endpoint Probe")
 print("="*50)
-# order-service sends 3 requests to /admin
 for i in range(3):
     send_request("order-service", path="/admin", delay=0.5)
 

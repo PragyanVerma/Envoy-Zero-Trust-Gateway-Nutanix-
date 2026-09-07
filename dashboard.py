@@ -33,7 +33,6 @@ df = load_data()
 if df.empty:
     st.warning("No data in logs/requests.log yet. Send some traffic!")
 else:
-    # Top stats
     total_reqs = len(df)
     sandboxed = len(df[df['route'] == 'sandbox'])
     standard = len(df[df['route'] == 'standard'])
@@ -44,16 +43,12 @@ else:
     c3.metric("Routed to Sandbox", sandboxed)
     
     st.subheader("Trust Score over Time (by caller)")
-    # Chart
     chart_data = df.pivot(index='timestamp', columns='caller_id', values='trust_score')
-    # Fill NA with forward fill then back fill so lines don't break
     chart_data = chart_data.fillna(method='ffill').fillna(method='bfill')
     st.line_chart(chart_data)
     
     st.subheader("Recent Requests Table")
-    # Table (last 20)
     st.dataframe(df.sort_values(by='timestamp', ascending=False).head(20))
 
-# Auto refresh every 2 seconds
 time.sleep(2)
 st.rerun()

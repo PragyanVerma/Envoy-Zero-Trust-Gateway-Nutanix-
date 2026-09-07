@@ -9,16 +9,12 @@ import os
 def create_synthetic_data(n_samples=300):
     np.random.seed(42)
     
-    # Features
     request_rate = np.random.uniform(0, 20, n_samples)
     is_sensitive = np.random.choice([0, 1], n_samples, p=[0.8, 0.2])
     hour_of_day = np.random.randint(0, 24, n_samples)
     
-    # Label logic: 1 if trusted, 0 if suspicious
-    # Baseline: trusted if rate < 8 and not sensitive
     labels = np.where((request_rate < 8) & (is_sensitive == 0), 1, 0)
     
-    # Introduce some noise to make it not perfectly separable
     noise = np.random.choice([0, 1], n_samples, p=[0.9, 0.1])
     labels = np.logical_xor(labels, noise).astype(int)
     
