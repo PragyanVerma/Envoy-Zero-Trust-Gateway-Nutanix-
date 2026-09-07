@@ -1,12 +1,9 @@
-# 🛡️ Envoy Zero-Trust Intelligent Gateway
+# Envoy Zero-Trust Intelligent Gateway
 
 > An ML-powered, production-grade edge gateway that enforces zero-trust security using real-time trust scoring, dynamic routing, distributed rate limiting, and full observability — built with Envoy, FastAPI, Scikit-Learn, Redis, Prometheus, Grafana, and Docker Compose.
 
 
-<p align="center">
-  <img src="architechture.png" alt="Envoy Zero-Trust Gateway Architecture" width="800"/>
-</p>
-<p align="center"><i>High-level architecture showing request flow through the Envoy Gateway, ML Auth Service, Redis, and dual backends with the Prometheus + Grafana observability stack.</i></p>
+
 
 ---
 
@@ -103,7 +100,6 @@ The system is composed of **7 Docker containers** that work together:
           └───────────────────────────────────────┘
 ```
 
-> 📸 **See the full architecture diagram above** ([architechture.png](architechture.png)) for a visual overview of the complete request flow.
 
 ### Container Summary
 
