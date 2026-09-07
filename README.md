@@ -1,377 +1,199 @@
 # Envoy Zero-Trust Intelligent Gateway
 
-> An ML-powered, production-grade edge gateway that enforces zero-trust security using real-time trust scoring, dynamic routing, distributed rate limiting, and full observability — built with Envoy, FastAPI, Scikit-Learn, Redis, Prometheus, Grafana, and Docker Compose.
+An edge gateway that replaces static rate limits with real ML-based trust scoring. Every request gets scored in real time and routed to either a normal backend or an isolated sandbox, depending on how suspicious it looks. Built on Envoy, FastAPI, scikit-learn, Redis, and the usual Prometheus/Grafana combo, all wired together with Docker Compose.
 
+I put this together because static thresholds like "100 req/min" are trivial to get around with a slow enough attack. This does something smarter — it looks at request rate, endpoint sensitivity, and time of day, feeds those into a logistic regression model, and makes a routing decision per request.
 
+## Contents
 
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Key Features](#key-features)
+- [Why this exists](#why-this-exists)
 - [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Setup & Installation](#setup--installation)
-  - [Step 1: Clone the Repository](#step-1-clone-the-repository)
-  - [Step 2: Generate JWT Keys](#step-2-generate-jwt-keys)
-  - [Step 3: Train the ML Model](#step-3-train-the-ml-model)
-  - [Step 4: Start the Infrastructure](#step-4-start-the-infrastructure)
-- [How It Works](#how-it-works)
-  - [Request Lifecycle](#request-lifecycle)
-  - [ML Trust Scoring](#ml-trust-scoring)
-  - [Distributed Rate Limiting (Redis)](#distributed-rate-limiting-redis)
-  - [Dynamic Routing](#dynamic-routing)
-  - [Circuit Breakers & Retry Logic](#circuit-breakers--retry-logic)
-- [Running the Attack Simulation](#running-the-attack-simulation)
-- [Dashboards & Observability](#dashboards--observability)
-  - [Streamlit Live Dashboard](#streamlit-live-dashboard)
-  - [Web Dashboard (Static HTML)](#web-dashboard-static-html)
-  - [Grafana (Envoy Metrics)](#grafana-envoy-metrics)
-  - [Prometheus (Metrics Store)](#prometheus-metrics-store)
-- [Configuration Reference](#configuration-reference)
-- [Teardown](#teardown)
+- [Stack](#stack)
+- [Repo layout](#repo-layout)
+- [Getting it running](#getting-it-running)
+- [How a request actually flows through](#how-a-request-actually-flows-through)
+- [The trust model](#the-trust-model)
+- [Rate limiting with Redis](#rate-limiting-with-redis)
+- [Circuit breakers](#circuit-breakers--retries)
+- [Attack simulation](#attack-simulation)
+- [Dashboards](#dashboards)
+- [Config files, if you need to change something](#config-files)
+- [Tearing it down](#tearing-it-down)
 
----
+## Why this exists
 
-## Overview
+Most rate limiters are static and stateless in the worst way — they don't care *who* you are or *what* you're hitting, just how fast you're hitting it. That's easy to route around. This project scores trust dynamically using three signals (request rate, whether the endpoint is sensitive, hour of day), and routes low-trust traffic into a sandboxed backend instead of just blocking it outright. That way you still get a response (useful for not tipping off an attacker) without exposing anything real.
 
-Traditional rate limiters use static thresholds (e.g., "100 requests/min") that are easily bypassed by low-and-slow attacks. This project replaces that with an **ML-powered trust scoring engine** that evaluates every request in real time using multiple behavioral signals — request rate, endpoint sensitivity, and time of day — to dynamically route traffic between a **standard backend** (trusted) and an **isolated sandbox backend** (suspicious).
-
-The entire system is containerized with **Docker Compose** and runs as **7 interconnected services**.
-
----
-
-## Key Features
-
-| Feature | Description |
-|---|---|
-| **JWT Authentication (RS256)** | Envoy validates every incoming JWT before any backend sees it. Identity (`sub` claim) is extracted and forwarded to the auth service. |
-| **ML Trust Scoring** | A Logistic Regression model (Scikit-Learn) scores every request based on 3 features: request rate, endpoint sensitivity, and hour of day. |
-| **Dynamic Routing** | Envoy's `ext_authz` filter + `clear_route_cache: true` enables per-request routing decisions — trusted traffic goes to the standard backend, suspicious traffic is sandboxed. |
-| **Distributed Rate Limiting** | Redis Sorted Sets implement a sliding window rate counter per identity. No in-memory state — scales horizontally. |
-| **Circuit Breakers** | Envoy enforces connection limits (`max_connections: 100`), pending request caps (`max_pending: 50`), and automatic retries on `5xx` and `connect-failure`. |
-| **Outlier Detection** | 3 consecutive `5xx` responses eject a backend from the load balancing pool for 30 seconds. |
-| **Live Dashboards** | Streamlit dashboard for ML decisions, a standalone HTML dashboard with attack simulation, and Grafana for Envoy proxy metrics. |
-
----
+It runs as seven containers under Docker Compose — Envoy in front, a FastAPI auth service doing the ML inference and rate-limit bookkeeping, Redis backing the sliding window counters, two Flask backends (standard + sandbox), and Prometheus/Grafana watching Envoy's metrics.
 
 ## Architecture
 
-The system is composed of **7 Docker containers** that work together:
+Requests come in through Envoy, which validates the JWT, then calls out to the auth service (`ext_authz`) before deciding where to route. The auth service checks Redis for the caller's recent request rate, runs the trust model, and hands back a routing header. Envoy re-evaluates the route based on that header (this requires `clear_route_cache: true` — more on that below) and sends the request on to either the standard backend or the sandbox.
 
 ```
-                         ┌──────────────────────────┐
-                         │   Client / Attack Script  │
-                         └────────────┬─────────────┘
-                                      │ HTTP + JWT (RS256)
-                                      ▼
-                    ┌─────────────────────────────────────┐
-                    │        Envoy Gateway (:10000)        │
-                    │  JWT Validation → ext_authz → Route  │
-                    │     Circuit Breakers · Retry Logic    │
-                    └───┬──────────┬──────────┬───────────┘
-                        │          │          │
-                  ext_authz    Trusted    Suspicious
-                   check      Traffic     Traffic
-                        │          │          │
-                        ▼          ▼          ▼
-          ┌──────────────────┐ ┌────────┐ ┌────────┐
-          │  Auth Service    │ │Standard│ │Sandbox │
-          │  (FastAPI :8000) │ │Backend │ │Backend │
-          │  ML Model +      │ │(Flask  │ │(Flask  │
-          │  Rate Limiting   │ │ :5001) │ │ :5002) │
-          └────────┬─────────┘ └────────┘ └────────┘
-                   │
-                   │ Sliding Window
-                   ▼ (ZADD/ZCARD)
-             ┌───────────┐
-             │   Redis    │
-             │  (:6379)   │
-             └───────────┘
-
-          ┌───────────────────────────────────────┐
-          │          Observability Stack           │
-          │  Prometheus (:9090) → Grafana (:3000)  │
-          │  Scrapes /stats/prometheus from Envoy   │
-          └───────────────────────────────────────┘
+Client → Envoy (JWT check) → ext_authz call → Auth Service
+                                                   │
+                                    Redis (rate)   │   Trust model (sklearn)
+                                          └─────────┴─────────┘
+                                                   │
+                                          x-route-to: standard | sandbox
+                                                   │
+                                       Envoy re-routes accordingly
+                                                   │
+                                  ┌────────────────┴────────────────┐
+                             Standard backend               Sandbox backend
+                               (Flask, :5001)                 (Flask, :5002)
 ```
 
+Prometheus scrapes Envoy's stats endpoint separately and Grafana visualizes it — that part runs independently of the request path.
 
-### Container Summary
+### Containers
 
-| # | Service | Port(s) | Role |
-|---|---|---|---|
-| 1 | **Envoy** | `10000`, `9901` (admin) | API Gateway — JWT validation, ext_authz, dynamic routing, circuit breakers |
-| 2 | **Auth Service** | `8000` | FastAPI — ML trust scoring, Redis rate limiting, route decisions |
-| 3 | **Redis** | `6379` | Distributed sliding window rate limiter (Sorted Sets) |
-| 4 | **Standard Backend** | `5001` | Flask — serves trusted traffic |
-| 5 | **Sandbox Backend** | `5002` | Flask — isolated environment for suspicious traffic |
-| 6 | **Prometheus** | `9090` | Scrapes Envoy metrics from `/stats/prometheus` every 5s |
-| 7 | **Grafana** | `3000` | Pre-provisioned dashboards for Envoy proxy metrics |
+| Service | Port(s) | What it does |
+|---|---|---|
+| Envoy | 10000, 9901 (admin) | JWT validation, ext_authz, routing, circuit breakers |
+| Auth service | 8000 | FastAPI — ML scoring, Redis rate limiting |
+| Redis | 6379 | Sliding-window rate counters (sorted sets) |
+| Standard backend | 5001 | Flask, serves trusted traffic |
+| Sandbox backend | 5002 | Flask, isolated environment for suspicious traffic |
+| Prometheus | 9090 | Scrapes Envoy metrics every 5s |
+| Grafana | 3000 | Dashboards on top of Prometheus |
 
----
+## Stack
 
-## Tech Stack
+Envoy 1.28, FastAPI + Uvicorn, scikit-learn (just logistic regression, nothing fancy), Redis, Flask for the two backends, Prometheus + Grafana for observability, PyJWT/cryptography for RS256 tokens, and Streamlit for the live decision dashboard. Everything's orchestrated with Docker Compose.
 
-- **Envoy Proxy** `v1.28` — High-performance L7 proxy
-- **FastAPI** + **Uvicorn** — Async Python auth service
-- **Scikit-Learn** — Logistic Regression trust model
-- **Redis Alpine** — Sorted Set-based sliding window rate limiting
-- **Flask** — Lightweight backend services
-- **Prometheus** — Time-series metrics collection
-- **Grafana** — Metrics visualization
-- **Docker Compose** — Container orchestration
-- **Streamlit** — Live ML decision dashboard
-- **PyJWT + Cryptography** — RS256 JWT generation
-
----
-
-## Project Structure
+## Repo layout
 
 ```
 envoy-zero-trust-gateway/
-│
-├── docker-compose.yml           # Orchestrates all 7 containers
-│
+├── docker-compose.yml
 ├── envoy/
-│   └── envoy.yaml               # Full Envoy config (JWT, ext_authz, clusters, circuit breakers)
-│
+│   └── envoy.yaml              # JWT config, ext_authz, clusters, circuit breakers
 ├── auth-service/
-│   ├── main.py                  # FastAPI auth service (ML inference + Redis rate limiting)
-│   ├── trust_model.pkl          # Pre-trained Logistic Regression model
-│   ├── requirements.txt         # Python dependencies (fastapi, scikit-learn, redis, etc.)
-│   └── Dockerfile               # Container build config
-│
+│   ├── main.py                 # ML inference + Redis rate limiting
+│   ├── trust_model.pkl
+│   ├── requirements.txt
+│   └── Dockerfile
 ├── backend/
-│   ├── app.py                   # Standard Flask backend (trusted traffic)
+│   ├── app.py                  # standard Flask backend
 │   └── Dockerfile
-│
 ├── sandbox-backend/
-│   ├── app.py                   # Sandbox Flask backend (suspicious traffic)
+│   ├── app.py                  # sandbox Flask backend
 │   └── Dockerfile
-│
 ├── jwt-keys/
-│   ├── private.pem              # RSA private key (RS256 signing)
-│   └── public.pem               # RSA public key (JWT validation)
-│
+│   ├── private.pem
+│   └── public.pem
 ├── prometheus/
-│   └── prometheus.yml           # Scrape config (Envoy :9901/stats/prometheus)
-│
+│   └── prometheus.yml
 ├── grafana/
 │   └── provisioning/
-│       ├── datasources/
-│       │   └── datasource.yml   # Auto-provisions Prometheus as data source
+│       ├── datasources/datasource.yml
 │       └── dashboards/
-│           ├── dashboard.yml    # Dashboard provisioning config
-│           └── envoy.json       # Pre-built Envoy metrics dashboard
-│
+│           ├── dashboard.yml
+│           └── envoy.json
 ├── web-dashboard/
-│   └── index.html               # Standalone HTML dashboard with live attack simulator
-│
-├── train_model.py               # Script to train the Logistic Regression trust model
-├── generate_jwt.py              # Script to generate RSA keys & signed JWTs
-├── attack_simulation.py         # Script to simulate 3 attack scenarios against the gateway
-├── dashboard.py                 # Streamlit live dashboard (reads auth-service logs)
-│
-└── architechture.png            # Architecture diagram
+│   └── index.html              # standalone HTML dashboard, no backend needed
+├── train_model.py
+├── generate_jwt.py
+├── attack_simulation.py
+└── dashboard.py                # Streamlit dashboard
 ```
 
----
+## Getting it running
 
-## Prerequisites
+You'll need Docker + Docker Compose, and Python 3.9+ locally for the helper scripts (JWT generation, training, dashboards).
 
-- **Docker** & **Docker Compose** installed and running
-- **Python 3.9+** (for local scripts: JWT generation, ML training, dashboards)
-- **pip** (Python package manager)
-
----
-
-## Setup & Installation
-
-### Step 1: Clone the Repository
+**1. Clone it**
 
 ```bash
 git clone https://github.com/<your-username>/envoy-zero-trust-gateway.git
 cd envoy-zero-trust-gateway
 ```
 
-### Step 2: Generate JWT Keys
-
-Create a Python virtual environment and generate the RSA key pair used for JWT signing and validation:
+**2. Generate JWT keys**
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-
-# Install local dependencies
 pip install requests streamlit PyJWT cryptography pandas scikit-learn numpy joblib
 
-# Generate RSA key pair (creates jwt-keys/private.pem & public.pem)
 python generate_jwt.py
 ```
 
-This generates:
-- `jwt-keys/private.pem` — Used by the simulation scripts to sign JWTs
-- `jwt-keys/public.pem` — The corresponding public key (JWKS is embedded in `envoy.yaml`)
+This drops `private.pem` and `public.pem` into `jwt-keys/`. The public key's JWKS representation is already baked into `envoy/envoy.yaml` — if you regenerate the keys, you need to update that JWKS block by hand too, Envoy won't pick it up automatically.
 
-> **Note:** The JWKS (JSON Web Key Set) representation of the public key is already embedded inline in `envoy/envoy.yaml`. If you regenerate keys, you must update the JWKS in the Envoy config.
-
-### Step 3: Train the ML Model
+**3. Train the trust model**
 
 ```bash
 python train_model.py
 ```
 
-This script:
-1. Generates **300 synthetic training samples** with features: `request_rate`, `is_sensitive_endpoint`, `hour_of_day`
-2. Trains a **Logistic Regression** classifier (label: 1 = trusted, 0 = suspicious)
-3. Reports accuracy on a 20% test split
-4. Saves the model to `auth-service/trust_model.pkl`
+Generates 300 synthetic samples (features: request rate, sensitive-endpoint flag, hour of day), trains a logistic regression classifier, prints accuracy on a held-out 20%, and saves the model to `auth-service/trust_model.pkl`.
 
-**Label logic:**
-- **Trusted (1):** Request rate < 8/window AND not a sensitive endpoint
-- **Suspicious (0):** High request rate OR sensitive endpoint
-- ~10% noise is injected for realistic decision boundaries
+Label logic, roughly: under 8 requests per window and a non-sensitive endpoint counts as trusted; anything with a high rate or a sensitive path counts as suspicious. There's about 10% label noise mixed in so the decision boundary isn't a clean step function.
 
-### Step 4: Start the Infrastructure
+**4. Bring up the stack**
 
 ```bash
 docker compose up --build -d
 ```
 
-Wait ~10 seconds for all 7 containers to fully initialize. Verify with:
+Give it about 10 seconds, then check:
 
 ```bash
 docker compose ps
 ```
 
-You should see all services running:
-| Service | Status | Ports |
-|---|---|---|
-| envoy | Running | `10000`, `9901` |
-| auth-service | Running | `8000` |
-| redis | Running | `6379` |
-| backend | Running | `5001` |
-| sandbox-backend | Running | `5002` |
-| prometheus | Running | `9090` |
-| grafana | Running | `3000` |
+You should see all seven containers up: envoy, auth-service, redis, backend, sandbox-backend, prometheus, grafana.
 
----
+## How a request actually flows through
 
-## How It Works
+1. **Envoy validates the JWT** (RS256) — checks signature, issuer, audience. Bad token gets a 401 immediately, nothing downstream even sees it.
+2. **Envoy calls the auth service** via `ext_authz`, forwarding the JWT claims as headers.
+3. **Auth service checks Redis** for that identity's request rate — a pipelined `ZREMRANGEBYSCORE` / `ZADD` / `ZCARD` against a 10-second sliding window.
+4. **Auth service runs the model** — `[request_rate, is_sensitive_endpoint, hour_of_day]` goes into `predict_proba()`, and the probability of "trusted" comes back as the trust score.
+5. **Auth service responds** with an `x-route-to` header, either `standard` or `sandbox`, based on whether the score clears 0.5.
+6. **Envoy re-routes** based on that header. This step only works because of `clear_route_cache: true` in the ext_authz filter config — without it, Envoy picks the route *before* the auth check finishes, and the header gets ignored.
 
-### Request Lifecycle
+## The trust model
 
-Every incoming request flows through the following pipeline:
+Three features, nothing exotic:
 
-```
-Client sends HTTP request with JWT Bearer token
-        │
-        ▼
-   ┌─────────────────────────────────────────────┐
-   │ 1. ENVOY: JWT Validation (RS256)             │
-   │    - Validates signature, issuer, audience    │
-   │    - Extracts payload into metadata           │
-   │    - Rejects invalid tokens with 401          │
-   └──────────────────┬──────────────────────────┘
-                      ▼
-   ┌─────────────────────────────────────────────┐
-   │ 2. ENVOY → AUTH SERVICE: ext_authz check     │
-   │    - Forwards JWT claims via header           │
-   │    - Auth service extracts caller identity    │
-   └──────────────────┬──────────────────────────┘
-                      ▼
-   ┌─────────────────────────────────────────────┐
-   │ 3. AUTH SERVICE: Rate Limiting (Redis)       │
-   │    - ZREMRANGEBYSCORE: remove old timestamps  │
-   │    - ZADD: add current timestamp              │
-   │    - ZCARD: count requests in window          │
-   │    - Sliding window = 10 seconds              │
-   └──────────────────┬──────────────────────────┘
-                      ▼
-   ┌─────────────────────────────────────────────┐
-   │ 4. AUTH SERVICE: ML Inference                 │
-   │    - Features: [request_rate, is_sensitive,   │
-   │      hour_of_day]                             │
-   │    - LogisticRegression.predict_proba()       │
-   │    - trust_score = P(trusted)                 │
-   │    - Route = "standard" if ≥ 0.5 else         │
-   │      "sandbox"                                │
-   └──────────────────┬──────────────────────────┘
-                      ▼
-   ┌─────────────────────────────────────────────┐
-   │ 5. ENVOY: Dynamic Route Decision             │
-   │    - Reads x-route-to header from auth resp   │
-   │    - clear_route_cache: true re-evaluates     │
-   │      route AFTER auth response                │
-   │    - Routes to backend_service or             │
-   │      sandbox_backend cluster                  │
-   └──────────────────┬──────────────────────────┘
-                      ▼
-          ┌──────────────────────┐
-          │ Standard Backend     │  ← if trust_score ≥ 0.5
-          │   OR                 │
-          │ Sandbox Backend      │  ← if trust_score < 0.5
-          └──────────────────────┘
-```
+- **Request rate** — pulled straight from Redis (`ZCARD` on the sliding window)
+- **Sensitive endpoint** — 1 if the path contains `admin`, `delete`, or `refund`, else 0
+- **Hour of day** — 0–23, from the system clock
 
-### ML Trust Scoring
+Output is a trust score between 0 and 1. Score ≥ 0.5 goes to the standard backend, below that goes to sandbox. It's a simple model on purpose — the interesting part is the plumbing that lets Envoy make per-request routing decisions off of it, not the model itself.
 
-The auth service uses a **Logistic Regression** model with 3 input features:
-
-| Feature | Source | Description |
-|---|---|---|
-| `request_rate` | Redis `ZCARD` | Number of requests from this identity in the last 10s |
-| `is_sensitive_endpoint` | URL path parsing | `1` if path contains `admin`, `delete`, or `refund`; `0` otherwise |
-| `hour_of_day` | System clock | Current hour (0–23) |
-
-**Output:** `trust_score` = probability of class 1 (trusted), ranging from 0.0 to 1.0.
-
-**Routing threshold:** `trust_score ≥ 0.5` → Standard Backend, `trust_score < 0.5` → Sandbox Backend.
-
-### Distributed Rate Limiting (Redis)
-
-Rate limiting uses **Redis Sorted Sets** to implement a per-identity sliding window:
+## Rate limiting with Redis
 
 ```
-ZREMRANGEBYSCORE <caller_id> 0 <current_time - 10>    # Remove expired entries
-ZADD <caller_id> <current_time> <current_time>         # Add current request
-ZCARD <caller_id>                                       # Count = request_rate
-EXPIRE <caller_id> 11                                   # Auto-cleanup for idle keys
+ZREMRANGEBYSCORE <id> 0 <now - 10>   # drop anything outside the window
+ZADD <id> <now> <now>                 # record this request
+ZCARD <id>                            # this count is the request_rate feature
+EXPIRE <id> 11                        # so idle keys don't hang around forever
 ```
 
-All 4 commands execute in a single **Redis pipeline** (atomic, single round-trip).
+All four run in a single Redis pipeline, so it's one round trip and atomic. No in-memory counters anywhere, which means you can scale the auth service horizontally without the rate limiting getting inconsistent between instances.
 
-### Dynamic Routing
+## Circuit breakers & retries
 
-Envoy's routing is controlled by the `x-route-to` response header from the auth service:
-
-- **`x-route-to: standard`** → Routes to `backend_service` cluster (Flask on port 5001)
-- **`x-route-to: sandbox`** → Routes to `sandbox_backend` cluster (Flask on port 5002)
-
-> **Critical:** `clear_route_cache: true` in the ext_authz config is **required**. Without it, Envoy caches the route decision _before_ the auth service responds, making dynamic routing impossible.
-
-### Circuit Breakers & Retry Logic
-
-Each backend cluster in Envoy is configured with:
+Each backend cluster in Envoy has:
 
 ```yaml
 circuit_breakers:
   thresholds:
-    - max_connections: 100        # Max concurrent connections
-      max_pending_requests: 50    # Max queued requests
-      max_requests: 100           # Max active requests
-      max_retries: 3              # Max concurrent retries
+    - max_connections: 100
+      max_pending_requests: 50
+      max_requests: 100
+      max_retries: 3
 
 outlier_detection:
-  consecutive_5xx: 3              # Eject after 3 consecutive 5xx
-  interval: 10s                   # Check interval
-  base_ejection_time: 30s         # Ejection duration
-  max_ejection_percent: 50        # Max % of hosts ejected
+  consecutive_5xx: 3
+  interval: 10s
+  base_ejection_time: 30s
+  max_ejection_percent: 50
 
 retry_policy:
   retry_on: "5xx,connect-failure,reset"
@@ -379,191 +201,105 @@ retry_policy:
   per_try_timeout: 2s
 ```
 
----
+Three consecutive 5xxs and a backend gets pulled out of the pool for 30 seconds. Nothing unusual here, just standard Envoy resilience config.
 
-## Running the Attack Simulation
+## Attack simulation
 
-With the virtual environment activated and all containers running:
+With containers up and the venv active:
 
 ```bash
-source venv/bin/activate
 python attack_simulation.py
 ```
 
-### Simulation Scenarios
+It runs three scenarios against `localhost:10000`:
 
-The script runs **3 automated attack scenarios** against `http://localhost:10000`:
+**Normal traffic** — `order-service` sends 5 requests, 1s apart. Trust score should stay around 0.7+, everything lands on the standard backend. Low rate, boring endpoint, no reason to be suspicious.
 
-#### Scenario 1: Normal Traffic
-- **Identity:** `order-service`
-- **Behavior:** 5 requests with 1-second delays
-- **Expected:** Trust score stays high (~0.7+), all requests routed to **STANDARD** backend
-- **Why:** Low request rate + non-sensitive path = trusted
+**Burst attack** — `suspicious-service` fires 15 requests back to back with no delay. Trust score drops as the rate climbs; somewhere around request 5-8 it crosses below 0.5 and starts getting sandboxed.
 
-#### Scenario 2: Burst Attack
-- **Identity:** `suspicious-service`
-- **Behavior:** 15 rapid-fire requests with no delay
-- **Expected:** Trust score drops progressively as request rate climbs. After ~5-8 requests, crosses the 0.5 threshold and routes to **SANDBOX**
-- **Why:** High request rate within 10s window triggers ML model's suspicion
+**Sensitive endpoint probe** — `order-service` hits `/admin` three times, 0.5s apart. Trust score falls off a cliff immediately (down around 0.1) since `is_sensitive_endpoint` is a strong signal on its own, regardless of rate.
 
-#### Scenario 3: Sensitive Endpoint Probe
-- **Identity:** `order-service`
-- **Behavior:** 3 requests to `/admin` with 0.5s delay
-- **Expected:** Trust score drops immediately to ~0.1, all requests routed to **SANDBOX**
-- **Why:** `is_sensitive_endpoint = 1` is a strong negative signal in the model
-
-### Sample Output
+Sample output looks something like:
 
 ```
-==================================================
 SCENARIO 1: Normal Traffic
-==================================================
-[order-service] / -> Route: STANDARD | Trust Score: 0.7234
-[order-service] / -> Route: STANDARD | Trust Score: 0.7134
+[order-service] / -> STANDARD | trust: 0.7234
+[order-service] / -> STANDARD | trust: 0.7134
 ...
 
-==================================================
 SCENARIO 2: Burst Attack
-==================================================
-[suspicious-service] / -> Route: STANDARD | Trust Score: 0.6891
-[suspicious-service] / -> Route: STANDARD | Trust Score: 0.6012
-[suspicious-service] / -> Route: SANDBOX  | Trust Score: 0.4321
-[suspicious-service] / -> Route: SANDBOX  | Trust Score: 0.2187
+[suspicious-service] / -> STANDARD | trust: 0.6891
+[suspicious-service] / -> STANDARD | trust: 0.6012
+[suspicious-service] / -> SANDBOX  | trust: 0.4321
+[suspicious-service] / -> SANDBOX  | trust: 0.2187
 ...
 
-==================================================
 SCENARIO 3: Sensitive Endpoint Probe
-==================================================
-[order-service] /admin -> Route: SANDBOX | Trust Score: 0.0923
-[order-service] /admin -> Route: SANDBOX | Trust Score: 0.0812
+[order-service] /admin -> SANDBOX | trust: 0.0923
+[order-service] /admin -> SANDBOX | trust: 0.0812
 ...
 ```
 
----
+## Dashboards
 
-## Dashboards & Observability
+**Streamlit** (`streamlit run dashboard.py`) — reads the auth service's JSON logs and shows request counts, trust score over time per identity, and a recent-requests table. Refreshes every 2 seconds, opens at `localhost:8501`.
 
-### Streamlit Live Dashboard
+**Static HTML dashboard** (`web-dashboard/index.html`) — no backend needed, runs entirely client-side. Has five click-to-run attack scenarios built in, a live telemetry stream, a side-by-side comparison of static vs. ML-based limiting, and a circuit breaker simulator.
 
-A real-time dashboard that reads the auth-service's JSON log file and visualizes ML trust scores:
+**Grafana** (`localhost:3000`, login `admin`/`admin`) — pre-provisioned with Prometheus as a data source and an Envoy dashboard covering request rates, connection pool usage, circuit breaker trips, and latency percentiles.
 
-```bash
-source venv/bin/activate
-streamlit run dashboard.py
-```
+**Prometheus** (`localhost:9090`) — scrapes `envoy:9901/stats/prometheus` (note: not `/metrics`) every 5 seconds.
 
-**Features:**
-- Total requests, standard vs. sandboxed counts
-- Trust score over time (line chart, per caller identity)
-- Recent requests table with full details
-- Auto-refreshes every 2 seconds
+## Config files
 
-> **Access:** Opens automatically in your browser (default: `http://localhost:8501`)
-
-### Web Dashboard (Static HTML)
-
-A standalone, zero-dependency HTML dashboard with a built-in attack simulator:
-
-```bash
-open web-dashboard/index.html
-```
-
-**Features:**
-- 5 pre-built attack scenarios (click-to-run)
-- Live telemetry stream showing every request
-- Static vs. ML rate limiter comparison panel
-- Circuit breaker & retry simulation
-- Client identity profile table
-- All logic runs in-browser (no backend required)
-
-### Grafana (Envoy Metrics)
-
-Pre-provisioned with a Prometheus data source and Envoy dashboard:
-
-> **Access:** [http://localhost:3000](http://localhost:3000) (default login: `admin` / `admin`)
-
-**Monitors:**
-- Envoy upstream/downstream request rates
-- Connection pool utilization
-- Circuit breaker trip events
-- Response latency percentiles
-
-### Prometheus (Metrics Store)
-
-Scrapes Envoy's admin endpoint every 5 seconds:
-
-> **Access:** [http://localhost:9090](http://localhost:9090)
-
-**Config:** Scrapes `envoy:9901/stats/prometheus` (not `/metrics`)
-
----
-
-## Configuration Reference
-
-| Config File | Purpose |
+| File | Purpose |
 |---|---|
-| [`envoy/envoy.yaml`](envoy/envoy.yaml) | Envoy listener, JWT validation (inline JWKS), ext_authz filter, cluster definitions, circuit breakers, outlier detection |
-| [`auth-service/main.py`](auth-service/main.py) | FastAPI auth handler, ML inference, Redis rate limiting, JSON logging |
-| [`docker-compose.yml`](docker-compose.yml) | Service definitions, port mappings, volume mounts, dependency graph |
-| [`prometheus/prometheus.yml`](prometheus/prometheus.yml) | Scrape targets and intervals |
-| [`grafana/provisioning/datasources/datasource.yml`](grafana/provisioning/datasources/datasource.yml) | Prometheus data source URL |
-| [`grafana/provisioning/dashboards/dashboard.yml`](grafana/provisioning/dashboards/dashboard.yml) | Dashboard auto-provisioning config |
+| `envoy/envoy.yaml` | Listener, JWT/JWKS, ext_authz filter, clusters, circuit breakers |
+| `auth-service/main.py` | ML inference, Redis rate limiting, logging |
+| `docker-compose.yml` | Service defs, ports, volumes, dependency ordering |
+| `prometheus/prometheus.yml` | Scrape targets/intervals |
+| `grafana/provisioning/datasources/datasource.yml` | Prometheus data source URL |
+| `grafana/provisioning/dashboards/dashboard.yml` | Dashboard auto-provisioning |
 
-### Key Environment Variables
+The one environment variable worth knowing about: `REDIS_HOST` on the auth service, defaults to `localhost`, gets set to `redis` in the Compose file for container networking.
 
-| Variable | Service | Default | Description |
-|---|---|---|---|
-| `REDIS_HOST` | auth-service | `localhost` | Redis hostname (set to `redis` in Docker) |
-
----
-
-## Teardown
-
-Stop and remove all containers:
+## Tearing it down
 
 ```bash
 docker compose down
 ```
 
-To also remove built images:
+Add `--rmi all` if you want the built images gone too.
+
+## Quick reference
 
 ```bash
-docker compose down --rmi all
-```
-
----
-
-## Quick Reference
-
-```bash
-# Start everything
+# start everything
 docker compose up --build -d
 
-# Generate a JWT for testing
+# generate a JWT for testing
 python -c 'from generate_jwt import create_jwt; print(create_jwt("my-service"))'
 
-# Send a single authenticated request
+# hit the gateway with an authenticated request
 curl -H "Authorization: Bearer $(python -c 'from generate_jwt import create_jwt; print(create_jwt("test-user"))')" http://localhost:10000/
 
-# Run attack simulation
+# run the attack simulation
 python attack_simulation.py
 
-# Launch Streamlit dashboard
+# streamlit dashboard
 streamlit run dashboard.py
 
-# Check container logs
+# logs
 docker compose logs -f auth-service
 docker compose logs -f envoy
 
-# Retrain ML model
+# retrain the model
 python train_model.py
 
-# Teardown
+# teardown
 docker compose down
 ```
 
 ---
 
-<p align="center">
-  <b>Built with</b> Envoy · FastAPI · Scikit-Learn · Redis · Prometheus · Grafana · Docker Compose
-</p>
+Built with Envoy, FastAPI, scikit-learn, Redis, Prometheus, Grafana, and Docker Compose.
