@@ -12,9 +12,10 @@ This project demonstrates a dynamic, ML-powered rate limiter and routing engine 
 
 ## 1. Setup & Installation
 
-Open your terminal and navigate to the project directory:
+Clone the repository and navigate to the project directory:
 ```bash
-cd /Users/satviksingh121/Desktop/hackathon/envoy-basics
+git clone https://github.com/PragyanVerma/Envoy-Zero-Trust-Gateway-Nutanix-.git
+cd Envoy-Zero-Trust-Gateway-Nutanix-
 ```
 
 Create a virtual environment and install the required local dependencies for the dashboard and simulation scripts:
@@ -51,7 +52,7 @@ This will automatically open a browser window displaying the live metrics and ch
 Open a **second terminal** window, navigate to the project, activate the virtual environment, and run the simulation script to generate traffic:
 
 ```bash
-cd /Users/satviksingh121/Desktop/hackathon/envoy-basics
+cd Envoy-Zero-Trust-Gateway-Nutanix-
 source venv/bin/activate
 python attack_simulation.py
 ```
